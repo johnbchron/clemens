@@ -13,7 +13,7 @@ use crate::helpers::{
   option_ser_to_option,
 };
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct AnalyzedTransaction {
   pub txn_hash:                 String,
   pub block:                    u64,

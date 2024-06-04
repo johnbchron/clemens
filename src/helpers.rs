@@ -2,8 +2,25 @@ use std::str::FromStr;
 
 use solana_sdk::{pubkey::Pubkey, signature::Signature};
 use solana_transaction_status::{
-  option_serializer::OptionSerializer, EncodedTransaction, UiMessage,
+  option_serializer::OptionSerializer,
+  EncodedConfirmedTransactionWithStatusMeta, EncodedTransaction,
+  UiConfirmedBlock, UiMessage,
 };
+
+pub fn transactions_from_block(
+  block: UiConfirmedBlock,
+) -> Vec<EncodedConfirmedTransactionWithStatusMeta> {
+  block
+    .transactions
+    .unwrap()
+    .into_iter()
+    .map(move |t| EncodedConfirmedTransactionWithStatusMeta {
+      slot:        block.block_height.unwrap(),
+      transaction: t,
+      block_time:  block.block_time,
+    })
+    .collect()
+}
 
 pub fn option_ser_to_option<T>(input: OptionSerializer<T>) -> Option<T> {
   match input {

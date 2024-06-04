@@ -4,15 +4,17 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-color-eyre = "0.6.3"
-indicatif = { version = "0.17.8", features = ["rayon"] }
-rayon = "1.10.0"
-serde = { version = "1.0.203", features = ["derive"] }
-serde_json = "1.0.117"
-solana-client = "1.18.15"
-solana-sdk = "1.18.15"
-solana-transaction-status = "1.18.15"
-thiserror = "1.0.61"
-tokio = { version = "1.38.0", features = ["full"] }
-tracing = "0.1.40"
-tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
+color-eyre = "0.6"
+futures = "0.3"
+indicatif = { version = "0.17", features = ["rayon"] }
+rayon = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+solana-client = "1.18"
+solana-sdk = "1.18"
+solana-transaction-status = "1.18"
+sqlx = { version = "0.7", default-features = false, features = ["postgres", "runtime-tokio", "tls-rustls", "macros"] }
+thiserror = "1.0"
+tokio = { version = "1", features = ["full"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
