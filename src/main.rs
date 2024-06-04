@@ -9,14 +9,17 @@ use color_eyre::eyre::{Context, Result};
 use indicatif::{ParallelProgressIterator, ProgressIterator};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
-use solana_client::{rpc_client::RpcClient, rpc_config::RpcTransactionConfig};
+use solana_client::{
+  rpc_client::RpcClient,
+  rpc_config::{RpcBlockConfig, RpcTransactionConfig},
+};
 use solana_sdk::{
   commitment_config::CommitmentConfig, pubkey::Pubkey, signature::Signature,
 };
 use solana_transaction_status::{
   option_serializer::OptionSerializer,
-  EncodedConfirmedTransactionWithStatusMeta, EncodedTransaction, UiMessage,
-  UiTransactionEncoding,
+  EncodedConfirmedTransactionWithStatusMeta, EncodedTransaction,
+  UiConfirmedBlock, UiMessage, UiTransactionEncoding,
 };
 
 fn option_ser_to_option<T>(input: OptionSerializer<T>) -> Option<T> {
@@ -51,38 +54,62 @@ fn hash_from_encoded_transaction(
   }
 }
 
-fn fee_payer_from_encoded_transaction(
+fn account_list_from_encoded_transaction(
   txn: &EncodedTransaction,
-) -> Option<Pubkey> {
+) -> Vec<Pubkey> {
   match txn {
     EncodedTransaction::LegacyBinary(a) => {
       EncodedTransaction::LegacyBinary(a.to_owned())
         .decode()
-        .map(|t| t.message.static_account_keys()[0])
+        .map(|t| t.message.static_account_keys().to_vec())
+        .unwrap_or_default()
     }
     EncodedTransaction::Binary(a, b) => {
       EncodedTransaction::Binary(a.to_owned(), *b)
         .decode()
-        .map(|t| t.message.static_account_keys()[0])
+        .map(|t| t.message.static_account_keys().to_vec())
+        .unwrap_or_default()
     }
-    EncodedTransaction::Json(d) => Some(match d.message.clone() {
-      UiMessage::Parsed(a) => Pubkey::from_str(&a.account_keys[0].pubkey)
-        .expect("failed to parse pubkey from account list"),
-      UiMessage::Raw(a) => Pubkey::from_str(&a.account_keys[0])
-        .expect("failed to parse pubkey from account list"),
-    }),
-    EncodedTransaction::Accounts(a) => Some(
-      Pubkey::from_str(&a.account_keys[0].pubkey)
-        .expect("failed to parse pubkey from account list"),
-    ),
+    EncodedTransaction::Json(d) => match d.message.clone() {
+      UiMessage::Parsed(a) => a
+        .account_keys
+        .iter()
+        .map(|k| {
+          Pubkey::from_str(&k.pubkey)
+            .expect("failed to parse pubkey from account list")
+        })
+        .collect::<Vec<_>>(),
+      UiMessage::Raw(a) => a
+        .account_keys
+        .iter()
+        .map(|k| {
+          Pubkey::from_str(&k)
+            .expect("failed to parse pubkey from account list")
+        })
+        .collect::<Vec<_>>(),
+    },
+    EncodedTransaction::Accounts(a) => a
+      .account_keys
+      .iter()
+      .map(|k| {
+        Pubkey::from_str(&k.pubkey)
+          .expect("failed to parse pubkey from account list")
+      })
+      .collect::<Vec<_>>(),
   }
+}
+
+fn fee_payer_from_encoded_transaction(
+  txn: &EncodedTransaction,
+) -> Option<Pubkey> {
+  account_list_from_encoded_transaction(txn).first().cloned()
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct AnalyzedTransaction {
-  pub txn_hash:                 Signature,
+  pub txn_hash:                 String,
   pub block:                    u64,
-  pub fee_payer:                Pubkey,
+  pub fee_payer:                String,
   pub bought_tokens:            HashMap<String, u64>,
   pub sold_tokens:              HashMap<String, u64>,
   pub gas_fee:                  u64,
@@ -183,9 +210,9 @@ impl TryFrom<EncodedConfirmedTransactionWithStatusMeta>
     }
 
     Ok(AnalyzedTransaction {
-      txn_hash,
+      txn_hash: txn_hash.to_string(),
       block,
-      fee_payer,
+      fee_payer: fee_payer.to_string(),
       bought_tokens,
       sold_tokens,
       gas_fee,
@@ -196,42 +223,33 @@ impl TryFrom<EncodedConfirmedTransactionWithStatusMeta>
   }
 }
 
-fn fetch_txn_from_signature(
-  sig: &Signature,
+fn fetch_block_from_signature(
+  slot: u64,
   client: impl Deref<Target = RpcClient>,
-) -> Result<EncodedConfirmedTransactionWithStatusMeta> {
-  let cache_path = format!("/tmp/{}", sig);
+) -> Result<UiConfirmedBlock> {
+  let cache_path = format!("/tmp/block_{}", slot);
   if let Ok(cached_file) = std::fs::read(&cache_path) {
-    if let Ok(parsed_txn) = serde_json::from_slice::<
-      EncodedConfirmedTransactionWithStatusMeta,
-    >(&cached_file)
+    if let Ok(parsed_txn) =
+      serde_json::from_slice::<UiConfirmedBlock>(&cached_file)
     {
       return Ok(parsed_txn);
     }
   }
 
-  let config = RpcTransactionConfig {
-    encoding: Some(UiTransactionEncoding::JsonParsed),
-    // encoding: None,
-    commitment: None,
-    max_supported_transaction_version: Some(0),
-  };
-  let transaction = client
-    .get_transaction_with_config(
-      &Signature::from_str(&sig.to_string())
-        .wrap_err("failed to construct signature")?,
-      config,
-    )
-    .wrap_err("Failed to get transaction")?;
+  let block = client
+    .get_block_with_config(slot, RpcBlockConfig {
+      max_supported_transaction_version: Some(0),
+      ..Default::default()
+    })
+    .wrap_err("failed to fetch block")?;
 
   std::fs::write(
     &cache_path,
-    serde_json::to_string(&transaction)
-      .wrap_err("failed to serialize transaction")?,
+    serde_json::to_string(&block).wrap_err("failed to serialize block")?,
   )
   .wrap_err("failed to write to cache")?;
 
-  Ok(transaction)
+  Ok(block)
 }
 
 fn main() -> color_eyre::eyre::Result<()> {
@@ -246,25 +264,66 @@ fn main() -> color_eyre::eyre::Result<()> {
   let raydium_address =
     Pubkey::from_str("675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8")
       .expect("failed to create raydium pubkey");
-  println!("fetching recent signatures...");
-  let mut signatures = client
-    .get_signatures_for_address(&raydium_address)
-    .expect("failed to get signatures");
-  let signatures = signatures.split_off(signatures.len() - 100);
-  println!("finished fetching recent signatures.");
+  // println!("fetching recent signatures...");
+  // let mut signatures = client
+  //   .get_signatures_for_address(&raydium_address)
+  //   .expect("failed to get signatures")
+  //   .into_iter()
+  //   .filter(|s| s.err.is_none())
+  //   .collect::<Vec<_>>();
+  // let signatures = signatures.split_off(signatures.len() - 100);
+  // println!("finished fetching recent signatures.");
 
-  let transactions = signatures
+  // let transactions = signatures
+  //   .par_iter()
+  //   .progress_count(signatures.len() as u64)
+  //   .filter_map(|s| {
+  //     fetch_txn_from_signature(
+  //       &Signature::from_str(&s.signature).unwrap(),
+  //       client.clone(),
+  //     )
+  //     .ok()
+  //   })
+  //   .collect::<Vec<_>>();
+  // println!("finished fetching full transactions.");
+
+  let current_block = client.get_block_height().unwrap();
+  print!("fetching block slots...");
+  let block_slots = client
+    .get_blocks(current_block - 500, Some(current_block))
+    .unwrap();
+  println!(" done.");
+  println!("fetching blocks...");
+  let blocks = block_slots
     .iter()
-    .progress_count(signatures.len() as u64)
-    .filter_map(|s| {
-      fetch_txn_from_signature(
-        &Signature::from_str(&s.signature).unwrap(),
-        client.clone(),
-      )
-      .ok()
+    .progress_count(block_slots.len() as _)
+    .map(|s| fetch_block_from_signature(*s, client.clone()).unwrap())
+    .collect::<Vec<_>>();
+  println!("finished fetching blocks");
+
+  println!("filtering transactions...");
+  let transactions = blocks
+    .into_iter()
+    .flat_map(|b| {
+      b.transactions.unwrap().into_iter().map(move |t| {
+        EncodedConfirmedTransactionWithStatusMeta {
+          slot:        b.block_height.unwrap(),
+          transaction: t,
+          block_time:  b.block_time,
+        }
+      })
+    })
+    .collect::<Vec<_>>()
+    .into_par_iter()
+    .progress()
+    .filter(|t| {
+      account_list_from_encoded_transaction(&t.transaction.transaction)
+        .into_iter()
+        .position(|p| p == raydium_address)
+        .is_some()
     })
     .collect::<Vec<_>>();
-  println!("finished fetching full transactions.");
+  println!("finished filtering transactions.");
 
   let len = transactions.len() as u64;
   println!("analyzing transactions...");
@@ -276,7 +335,7 @@ fn main() -> color_eyre::eyre::Result<()> {
       a.success && (!a.bought_tokens.is_empty() || !a.sold_tokens.is_empty())
     })
     .collect::<Vec<_>>();
-  println!("finished analysis.");
+  println!("finished analysis");
 
   std::fs::write("analysis.txt", format!("{analysis:#?}")).unwrap();
   std::fs::write(
