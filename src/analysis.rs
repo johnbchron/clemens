@@ -71,18 +71,44 @@ impl TryFrom<EncodedConfirmedTransactionWithStatusMeta>
     let all_post_balances = option_ser_to_option(meta.post_token_balances)
       .ok_or(AnalysisError::MissingPostTokenBalancesList)?;
 
-    let pre_balances = all_pre_balances.into_iter().filter(|b| {
-  matches!(
-    option_ser_to_option(b.owner.clone()).map(|p| Pubkey::from_str(&p).expect("could not convert token owner string to `Pubkey`")),
-    Some(owner) if owner == fee_payer
-  )
-}).map(|b| (Pubkey::from_str(&b.mint).expect("could not convert token mint key string to `Pubkey`"), b.ui_token_amount.amount.parse::<u64>().expect("failed to parse token amount as `u64`"))).collect::<HashMap<_, _>>();
-    let post_balances = all_post_balances.into_iter().filter(|b| {
-  matches!(
-    option_ser_to_option(b.owner.clone()).map(|p| Pubkey::from_str(&p).expect("could not convert token owner string to `Pubkey`")),
-    Some(owner) if owner == fee_payer
-  )
-}).map(|b| (Pubkey::from_str(&b.mint).expect("could not convert token mint key string to `Pubkey`"), b.ui_token_amount.amount.parse::<u64>().expect("failed to parse token amount as `u64`"))).collect::<HashMap<_, _>>();
+    let pre_balances = all_pre_balances
+      .into_iter()
+      .filter(|b| {
+        option_ser_to_option(b.owner.clone()).map(|p| {
+          Pubkey::from_str(&p)
+            .expect("could not convert token owner string to `Pubkey`")
+        }) == Some(fee_payer)
+      })
+      .map(|b| {
+        (
+          Pubkey::from_str(&b.mint)
+            .expect("could not convert token mint key string to `Pubkey`"),
+          b.ui_token_amount
+            .amount
+            .parse::<u64>()
+            .expect("failed to parse token amount as `u64`"),
+        )
+      })
+      .collect::<HashMap<_, _>>();
+    let post_balances = all_post_balances
+      .into_iter()
+      .filter(|b| {
+        option_ser_to_option(b.owner.clone()).map(|p| {
+          Pubkey::from_str(&p)
+            .expect("could not convert token owner string to `Pubkey`")
+        }) == Some(fee_payer)
+      })
+      .map(|b| {
+        (
+          Pubkey::from_str(&b.mint)
+            .expect("could not convert token mint key string to `Pubkey`"),
+          b.ui_token_amount
+            .amount
+            .parse::<u64>()
+            .expect("failed to parse token amount as `u64`"),
+        )
+      })
+      .collect::<HashMap<_, _>>();
 
     let pre_keys = pre_balances.keys().cloned().collect::<HashSet<_>>();
     let post_keys = post_balances.keys().cloned().collect::<HashSet<_>>();

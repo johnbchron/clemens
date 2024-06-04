@@ -108,7 +108,6 @@ fn main() -> color_eyre::eyre::Result<()> {
     .collect::<Vec<_>>();
   println!("finished analysis");
 
-  std::fs::write("analysis.txt", format!("{analysis:#?}")).unwrap();
   std::fs::write(
     "analysis.json",
     serde_json::to_string(&analysis).wrap_err("failed to serialize to json")?,
