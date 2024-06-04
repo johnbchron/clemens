@@ -43,8 +43,12 @@ fn fetch_block_from_signature(
   Ok(block)
 }
 
-fn main() -> color_eyre::eyre::Result<()> {
+#[tokio::main]
+async fn main() -> color_eyre::eyre::Result<()> {
   color_eyre::install()?;
+  let filter = tracing_subscriber::EnvFilter::try_from_default_env()
+    .unwrap_or(tracing_subscriber::EnvFilter::new("clemens=debug"));
+  tracing_subscriber::fmt().with_env_filter(filter).init();
 
   let rpc_url = std::env::var("RPC_URL").expect("failed to get RPC url");
   let client = Arc::new(RpcClient::new_with_commitment(

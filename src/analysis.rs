@@ -44,6 +44,8 @@ impl TryFrom<EncodedConfirmedTransactionWithStatusMeta>
   for AnalyzedTransaction
 {
   type Error = AnalysisError;
+
+  #[tracing::instrument]
   fn try_from(
     txn: EncodedConfirmedTransactionWithStatusMeta,
   ) -> Result<Self, Self::Error> {
